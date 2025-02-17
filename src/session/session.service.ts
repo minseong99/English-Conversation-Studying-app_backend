@@ -9,17 +9,22 @@ export class SessionService implements OnModuleDestroy {
   constructor() {
     this.client = createClient();
     this.client.on('error', (err) => console.error('Redis Client Error', err));
-    this.client.connect();
+    if (process.env.NODE_ENV !== 'test') {
+      this.client.connect();
+    }
   }
 
-  async saveSession(sessionId: string, data: any) {
-    // TTL 1시간(3600초) 설정
-    await this.client.set(sessionId, JSON.stringify(data), { EX: 3600 });
+  // 새 메시지를 누적하여 저장 (메시지 배열 형태)
+  async saveSession(sessionId: string, newMessage: any) {
+    const existingData = await this.client.get(sessionId);
+    let messages = existingData ? JSON.parse(existingData) : [];
+    messages.push(newMessage);
+    await this.client.set(sessionId, JSON.stringify(messages), { EX: 3600 });
   }
 
   async getSession(sessionId: string) {
     const data = await this.client.get(sessionId);
-    return data ? JSON.parse(data) : null;
+    return data ? JSON.parse(data) : [];
   }
 
   async deleteSession(sessionId: string) {
@@ -30,3 +35,5 @@ export class SessionService implements OnModuleDestroy {
     await this.client.disconnect();
   }
 }
+
+
