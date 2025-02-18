@@ -15,12 +15,14 @@ export class SessionService implements OnModuleDestroy {
   }
 
   // 새 메시지를 누적하여 저장 (메시지 배열 형태)
-  async saveSession(sessionId: string, newMessage: any) {
-    const existingData = await this.client.get(sessionId);
-    let messages = existingData ? JSON.parse(existingData) : [];
-    messages.push(newMessage);
-    await this.client.set(sessionId, JSON.stringify(messages), { EX: 3600 });
-  }
+async saveSession(sessionId: string, newMessage: any) {
+  const existingData = await this.client.get(sessionId);
+  let messages = existingData ? JSON.parse(existingData) : [];
+  messages.push(newMessage);
+  await this.client.set(sessionId, JSON.stringify(messages)); // 옵션 없이 set
+  await this.client.expire(sessionId, 3600); // TTL을 별도로 설정 (3600초)
+}
+
 
   async getSession(sessionId: string) {
     const data = await this.client.get(sessionId);

@@ -1,5 +1,5 @@
 // src/chat/chat.service.ts
-import { Injectable } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, HttpException, HttpStatus } from '@nestjs/common';
 import OpenAI from 'openai';
 import { SessionService } from '../session/session.service';
 import { PronunciationContext } from '../pronunciation/pronunciation.context';
@@ -20,41 +20,56 @@ export class ChatService {
   }
 
   async handleMessage(message: string, strategy: string, sessionId: string): Promise<any> {
-    // 1. 사용자 메시지를 세션에 저장 (채팅창에 사용자 메시지로 표시)
-    const userMessage = {
-      id: Date.now(),
-      text: message,
-      sender: 'user',
-    };
-    await this.sessionService.saveSession(sessionId, userMessage);
+    try {
+      // 1. 사용자 메시지를 세션에 저장 (채팅창에 사용자 메시지로 표시)
+      const userMessage = {
+        id: Date.now(),
+        text: message,
+        sender: 'user',
+      };
+      await this.sessionService.saveSession(sessionId, userMessage);
 
-    // 2. OpenAI API 호출 (최신 openai 패키지 방식 사용)
-    const openaiResponse = await this.openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      messages: [{ role: 'user', content: message }],
-    });
-    // 응답에서 텍스트 추출
-    const chatResponse = openaiResponse.choices[0].message?.content || 'No response';
+      // 2. OpenAI API 호출 (최신 openai 패키지 방식 사용)
+      const openaiResponse = await this.openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [{ role: 'user', content: message }],
+      });
+      // 응답에서 텍스트 추출
+      const chatResponse = openaiResponse.choices[0].message?.content || 'No response';
 
-    // 3. 선택한 발음 전략에 따라 텍스트 변환
-    let strategyImpl;
-    if (strategy === 'casual') {
-      strategyImpl = new CasualPronunciationStrategy();
-    } else {
-      strategyImpl = new DefaultPronunciationStrategy();
+      // 3. 선택한 발음 전략에 따라 텍스트 변환
+      let strategyImpl;
+      if (strategy === 'casual') {
+        strategyImpl = new CasualPronunciationStrategy();
+      } else {
+        strategyImpl = new DefaultPronunciationStrategy();
+      }
+      const pronunciationContext = new PronunciationContext(strategyImpl);
+      const pronouncedText = await pronunciationContext.execute(chatResponse);
+
+      // 4. AI(봇) 메시지를 세션에 저장 (채팅창에 봇 메시지로 표시)
+      const botMessage = {
+        id: Date.now() + 1,
+        text: pronouncedText,
+        sender: 'bot',
+      };
+      await this.sessionService.saveSession(sessionId, botMessage);
+
+      return { response: chatResponse, pronouncedText };
+    } catch (error) {
+      console.error('ChatService.handleMessage error:', error);
+      // OpenAI API의 429 에러(요청 한도 초과) 체크
+      if (error.status === 429) {
+        throw new HttpException(
+          'OpenAI API 요청 한도를 초과했습니다. 요금제 또는 사용량을 확인해주세요.',
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+      // 그 외 에러는 500 에러로 처리
+      throw new InternalServerErrorException('Chat 처리 중 문제가 발생했습니다.');
     }
-    const pronunciationContext = new PronunciationContext(strategyImpl);
-    const pronouncedText = await pronunciationContext.execute(chatResponse);
-
-    // 4. AI(봇) 메시지를 세션에 저장 (채팅창에 봇 메시지로 표시)
-    const botMessage = {
-      id: Date.now() + 1,
-      text: pronouncedText,
-      sender: 'bot',
-    };
-    await this.sessionService.saveSession(sessionId, botMessage);
-
-    return { response: chatResponse, pronouncedText };
   }
 }
+
+
 
