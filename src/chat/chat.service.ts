@@ -1,6 +1,6 @@
 // src/chat/chat.service.ts
 import { Injectable, InternalServerErrorException, HttpException, HttpStatus } from '@nestjs/common';
-import OpenAI from 'openai';
+import axios from 'axios';
 import { SessionService } from '../session/session.service';
 import { PronunciationContext } from '../pronunciation/pronunciation.context';
 import { DefaultPronunciationStrategy } from '../pronunciation/default-pronunciation.strategy';
@@ -8,16 +8,9 @@ import { CasualPronunciationStrategy } from '../pronunciation/casual-pronunciati
 
 @Injectable()
 export class ChatService {
-  private openai: OpenAI;
-
   constructor(
     private readonly sessionService: SessionService,
-  ) {
-    // OpenAI 인스턴스 생성 (기본 export인 OpenAI 사용)
-    this.openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
-  }
+  ) {}
 
   async handleMessage(message: string, strategy: string, sessionId: string): Promise<any> {
     try {
@@ -29,13 +22,17 @@ export class ChatService {
       };
       await this.sessionService.saveSession(sessionId, userMessage);
 
-      // 2. OpenAI API 호출 (최신 openai 패키지 방식 사용)
-      const openaiResponse = await this.openai.chat.completions.create({
-        model: 'gpt-3.5-turbo',
-        messages: [{ role: 'user', content: message }],
-      });
+      // 2. Hugging Face API 호출 (facebook/blenderbot-400M-distill 모델 사용)
+      const hfResponse = await axios.post(
+        'https://api-inference.huggingface.co/models/facebook/blenderbot-400M-distill',
+        { inputs: message },
+        {
+          headers: { Authorization: `Bearer ${process.env.HF_API_KEY}` }, // HF API 토큰 필요 (없으면 해당 헤더 제거)
+        },
+      );
+
       // 응답에서 텍스트 추출
-      const chatResponse = openaiResponse.choices[0].message?.content || 'No response';
+      const chatResponse = hfResponse.data[0]?.generated_text || 'No response';
 
       // 3. 선택한 발음 전략에 따라 텍스트 변환
       let strategyImpl;
@@ -56,20 +53,17 @@ export class ChatService {
       await this.sessionService.saveSession(sessionId, botMessage);
 
       return { response: chatResponse, pronouncedText };
-    } catch (error) {
+    } catch (error: any) {
       console.error('ChatService.handleMessage error:', error);
-      // OpenAI API의 429 에러(요청 한도 초과) 체크
-      if (error.status === 429) {
+      if (error.response && error.response.status === 429) {
         throw new HttpException(
-          'OpenAI API 요청 한도를 초과했습니다. 요금제 또는 사용량을 확인해주세요.',
+          'Hugging Face API 요청 한도를 초과했습니다.',
           HttpStatus.TOO_MANY_REQUESTS,
         );
       }
-      // 그 외 에러는 500 에러로 처리
       throw new InternalServerErrorException('Chat 처리 중 문제가 발생했습니다.');
     }
   }
 }
-
 
 
