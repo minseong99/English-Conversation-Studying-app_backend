@@ -37,33 +37,6 @@ export class SpeechController {
       throw new HttpException('STT 처리 중 오류 발생', HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
-
-  /**
-   * TTS Endpoint using Glow-TTS
-   * POST /api/speech/tts
-   * 입력: JSON { "text": "합성할 텍스트" }
-   * 출력: JSON { "audio": "<base64-encoded-audio>" }
-   */
-  @Post('tts')
-  async textToSpeech(@Body() body: { text: string }): Promise<any> {
-    try {
-      const response = await axios.post(
-        'https://api-inference.huggingface.co/models/tts_models/en/ljspeech/vits',
-        { inputs: body.text },
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.HF_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          responseType: 'arraybuffer',
-        }
-      );
-      const audioBase64 = Buffer.from(response.data, 'binary').toString('base64');
-      return { audio: audioBase64 };
-    } catch (error: any) {
-      console.error('TTS Error:', error);
-      throw new HttpException('TTS 처리 중 오류 발생', HttpStatus.INTERNAL_SERVER_ERROR);
-    }
-  }
+  
 }
 
