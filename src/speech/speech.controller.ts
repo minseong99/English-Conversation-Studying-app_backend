@@ -1,5 +1,7 @@
 import { Controller, Post, Body, HttpException, HttpStatus } from '@nestjs/common';
 import axios from 'axios';
+import { Buffer } from 'buffer';
+if (!global.Buffer) global.Buffer = Buffer;
 
 @Controller('api/speech')
 export class SpeechController {
@@ -36,34 +38,32 @@ export class SpeechController {
     }
   }
 
-/**
-   * TTS Endpoint
+  /**
+   * TTS Endpoint using Glow-TTS
    * POST /api/speech/tts
    * 입력: JSON { "text": "합성할 텍스트" }
-   * 처리: Hugging Face Inference API를 사용하여 TTS 모델(espnet/kan-bayashi_ljspeech_tts_train_fastspeech2)로 텍스트를 음성으로 변환
    * 출력: JSON { "audio": "<base64-encoded-audio>" }
    */
   @Post('tts')
   async textToSpeech(@Body() body: { text: string }): Promise<any> {
     try {
-    const response = await axios.post(
-      'https://api-inference.huggingface.co/models/espnet/kan-bayashi_ljspeech_tts_train_fastspeech2',
-      { inputs: body.text },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.HF_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        responseType: 'arraybuffer', // TTS 응답은 바이너리 데이터로 반환됩니다.
-      }
-    );
-    // 반환받은 바이너리 데이터를 base64 문자열로 변환
-    const audioBase64 = Buffer.from(response.data, 'binary').toString('base64');
-    return { audio: audioBase64 };
-  } catch (error: any) {
-    console.error('TTS Error:', error);
-    throw new HttpException('TTS 처리 중 오류 발생', HttpStatus.INTERNAL_SERVER_ERROR);
-  }
+      const response = await axios.post(
+        'https://api-inference.huggingface.co/models/tts_models/en/ljspeech/vits',
+        { inputs: body.text },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.HF_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          responseType: 'arraybuffer',
+        }
+      );
+      const audioBase64 = Buffer.from(response.data, 'binary').toString('base64');
+      return { audio: audioBase64 };
+    } catch (error: any) {
+      console.error('TTS Error:', error);
+      throw new HttpException('TTS 처리 중 오류 발생', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
   }
 }
 
