@@ -34,6 +34,11 @@ def main():
         # 작성한 WAV 데이터를 base64로 인코딩
         audio_bytes = buffer.getvalue()
         audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
+        
+        # 파일 생성
+        # with open("output.txt", "w") as f:
+        #     f.write(audio_base64)
+            
         print(audio_base64)
     except Exception as e:
         print("Error:", e, file=sys.stderr)
