@@ -55,8 +55,9 @@ export class SpeechController {
     try {
       // synthesize.py 스크립트를 호출하여 TTS 합성을 진행합니다.
       // 이 스크립트는 입력 텍스트를 받아 합성된 음성을 base64 문자열로 출력합니다.
-      const pythonPath = 'C:\\Users\\PC\\Desktop\\castone\\English-Conversation-Studying-app_backend\\English-Conversation-Studying-app_backend\\python_env\\Scripts\\python.exe';
-      const { stdout, stderr } = await execFileAsync('pythonPath', ['synthesize.py', body.text], { maxBuffer: 10 * 1024 * 1024 });
+      
+      const pythonPath = "C:/Users/PC/Desktop/castone/English-Conversation-Studying-app_backend/English-Conversation-Studying-app_backend/python_env/Scripts/python.exe";
+      const { stdout, stderr } = await execFileAsync(pythonPath, ['synthesize.py', body.text], { maxBuffer: 10 * 1024 * 1024 });
       if (stderr) {
         console.error('TTS Python stderr:', stderr);
         throw new Error(stderr);
