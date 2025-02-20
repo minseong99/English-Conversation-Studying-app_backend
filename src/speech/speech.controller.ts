@@ -44,28 +44,26 @@ export class SpeechController {
   }
 
   /**
-   * TTS Endpoint
+   * TTS Endpoint using Flask TTS Service
    * POST /api/speech/tts
-   * 입력: JSON { "text": "합성할 텍스트" }
-   * 처리: 내부 Python 스크립트(synthesize.py)를 호출하여 Coqui TTS를 이용해 
-   * tts_models/en/vctk/vits 모델로 텍스트를 해당 화자로 음성 합성
+   * 입력: JSON { "text": "합성할 텍스트", "speaker": "화자ID (선택)" }
+   * 처리: Flask TTS 서비스를 호출하여 TTS 모델을 이용해 텍스트를 해당 화자로 음성 합성
    * 출력: JSON { "audio": "<base64-encoded-audio>" }
    */
   @Post('tts')
   async textToSpeech(@Body() body: { text: string, speaker?: string }): Promise<any> {
     try {
-      // synthesize.py 스크립트를 호출하여 TTS 합성을 진행합니다.
-      // 이 스크립트는 입력 텍스트를 받아 합성된 음성을 base64 문자열로 출력합니다.
-      const pythonPath = "C:/Users/PC/Desktop/castone/English-Conversation-Studying-app_backend/English-Conversation-Studying-app_backend/python_env/Scripts/python.exe";
-      const args = body.speaker ? ['synthesize.py', body.text, body.speaker] : ['synthesize.py', body.text];
-      const { stdout, stderr } = await execFileAsync(pythonPath, args, { maxBuffer: 10 * 1024 * 1024 });
-      if (stderr) {
-        console.error('TTS Python stderr:', stderr);
-        throw new Error(stderr);
-      }
-      // stdout에 base64 인코딩된 오디오 문자열이 출력되므로, 이를 반환합니다.
-      return { audio: stdout.trim() };
-    } catch (error) {
+      const flaskUrl = 'http://127.0.0.1:5000/api/tts'; // Flask TTS 서비스의 URL로 교체하세요.
+      const response = await axios.post(
+        flaskUrl,
+        {
+          text: body.text,
+          speaker: body.speaker, // 선택적 화자 옵션
+        },
+        { headers: { 'Content-Type': 'application/json' } }
+      );
+      return response.data; // { audio: "base64string" }
+    } catch (error: any) {
       console.error('TTS Error:', error);
       throw new HttpException('TTS 처리 중 오류 발생', HttpStatus.INTERNAL_SERVER_ERROR);
     }
