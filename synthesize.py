@@ -7,18 +7,27 @@ from TTS.api import TTS  # Coqui TTS 패키지 사용
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: synthesize.py '텍스트 입력'")
+        print("Usage: synthesize.py '텍스트 입력' [speaker]", file=sys.stderr)
         sys.exit(1)
-    # text = sys.argv[1]
-    # sys.argv[1:]를 join하여 전체 문장을 하나의 문자열로 만듦
-    text = " ".join(sys.argv[1:])
+    # 전체 문장을 하나의 문자열로 합침
+    if len(sys.argv) > 2:
+        text = " ".join(sys.argv[1:-1])
+        speaker = sys.argv[-1]
+    else:
+        text = sys.argv[1]
+        speaker = None
     
     try:
-        # TTS 모델 초기화 (모델 이름은 필요에 따라 변경)
-        tts = TTS(model_name="tts_models/en/ljspeech/tacotron2-DDC", progress_bar=False, gpu=False)
+        # TTS 모델 초기화 (tts_models/en/vctk/vits 사용)
+        tts = TTS(model_name="tts_models/en/vctk/vits", progress_bar=False, gpu=False)
         
+        # 화자 옵션이 주어지면 해당 옵션을 전달
         # 텍스트를 음성으로 합성 (wav: NumPy 배열, 일반적으로 float 값으로 반환됨)
-        wav = tts.tts(text)  # 예: [-1, 1] 범위의 float 배열
+        if speaker:
+            wav = tts.tts(text, speaker=speaker)
+        else:
+            wav = tts.tts(text)# 예: [-1, 1] 범위의 float 배열
+            
         sample_rate = 22050  # 모델에 따라 샘플링 레이트가 다를 수 있음
 
         # float 배열을 int16로 변환 (값을 [-32767, 32767] 범위로 스케일링)

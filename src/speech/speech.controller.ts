@@ -47,17 +47,18 @@ export class SpeechController {
    * TTS Endpoint
    * POST /api/speech/tts
    * 입력: JSON { "text": "합성할 텍스트" }
-   * 처리: 내부 Python 스크립트(synthesize.py)를 호출하여 Coqui TTS(또는 ESPnet TTS)를 이용해 텍스트를 음성으로 변환
+   * 처리: 내부 Python 스크립트(synthesize.py)를 호출하여 Coqui TTS를 이용해 
+   * tts_models/en/vctk/vits 모델로 텍스트를 해당 화자로 음성 합성
    * 출력: JSON { "audio": "<base64-encoded-audio>" }
    */
   @Post('tts')
-  async textToSpeech(@Body() body: { text: string }): Promise<any> {
+  async textToSpeech(@Body() body: { text: string, speaker?: string }): Promise<any> {
     try {
       // synthesize.py 스크립트를 호출하여 TTS 합성을 진행합니다.
       // 이 스크립트는 입력 텍스트를 받아 합성된 음성을 base64 문자열로 출력합니다.
-      
       const pythonPath = "C:/Users/PC/Desktop/castone/English-Conversation-Studying-app_backend/English-Conversation-Studying-app_backend/python_env/Scripts/python.exe";
-      const { stdout, stderr } = await execFileAsync(pythonPath, ['synthesize.py', body.text], { maxBuffer: 10 * 1024 * 1024 });
+      const args = body.speaker ? ['synthesize.py', body.text, body.speaker] : ['synthesize.py', body.text];
+      const { stdout, stderr } = await execFileAsync(pythonPath, args, { maxBuffer: 10 * 1024 * 1024 });
       if (stderr) {
         console.error('TTS Python stderr:', stderr);
         throw new Error(stderr);
