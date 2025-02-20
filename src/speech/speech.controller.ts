@@ -53,7 +53,8 @@ export class SpeechController {
   @Post('tts')
   async textToSpeech(@Body() body: { text: string, speaker?: string }): Promise<any> {
     try {
-      const flaskUrl = 'http://127.0.0.1:5000/api/tts'; // Flask TTS 서비스의 URL로 교체하세요.
+      const FlaskIp = '127.0.0.1';
+      const flaskUrl = `http://${FlaskIp}:5000/api/tts`; // Flask TTS 서비스의 URL로 교체하세요.
       const response = await axios.post(
         flaskUrl,
         {
