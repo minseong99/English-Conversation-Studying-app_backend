@@ -1,5 +1,6 @@
 # app.py
 from flask import Flask, request, jsonify
+from flask_cors import CORS  # CORS 추가
 import base64
 import io
 import numpy as np
@@ -8,6 +9,7 @@ from TTS.api import TTS
 import logging
 
 app = Flask(__name__)
+CORS(app)  # 모든 엔드포인트에 대해 CORS 활성화
 logging.basicConfig(level=logging.INFO)
 
 # TTS 모델 프리로딩 (한 번만 로드)
