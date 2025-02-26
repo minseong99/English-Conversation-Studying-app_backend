@@ -19,10 +19,18 @@ export class SpeechController {
    */
   @Post('stt')
   async speechToText(@Body() body: { audio: string }): Promise<any> {
+    // 오디오 데이터가 제공되지 않았거나 빈 문자열인 경우
+    if (!body.audio || body.audio.trim() === '') {
+      throw new HttpException('No audio provided', HttpStatus.BAD_REQUEST);
+    }
+    
+    // base64로 인코딩된 오디오 데이터를 Buffer로 디코딩
+    const audioBuffer = Buffer.from(body.audio, 'base64');
+    if (audioBuffer.length === 0) {
+      throw new HttpException('Empty audio data', HttpStatus.BAD_REQUEST);
+    }
+    
     try {
-      // base64로 인코딩된 오디오 데이터를 Buffer로 디코딩
-      const audioBuffer = Buffer.from(body.audio, 'base64');
-
       // Hugging Face Inference API 호출: Wav2Vec2 모델
       const response = await axios.post(
         'https://api-inference.huggingface.co/models/facebook/wav2vec2-base-960h',
@@ -35,8 +43,8 @@ export class SpeechController {
         }
       );
       // 응답 데이터의 형식은 모델에 따라 다를 수 있음.
-      // 예시: { text: "인식된 텍스트" } 형태라고 가정
-      return { text: response.data.text || 'No transcription available' };
+      // 여기서는 텍스트가 없으면 빈 문자열을 반환하도록 함.
+      return { text: response.data.text || '' };
     } catch (error: any) {
       console.error('STT Error:', error);
       throw new HttpException('STT 처리 중 오류 발생', HttpStatus.INTERNAL_SERVER_ERROR);
