@@ -1,60 +1,57 @@
-# app.py
-from flask import Flask, request, jsonify
-from flask_cors import CORS  # CORS 추가
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from fastapi.responses import JSONResponse
 import base64
 import io
 import numpy as np
+import torch
 import wave
 from TTS.api import TTS
+import uvicorn
 import logging
 
-app = Flask(__name__)
-CORS(app)  # 모든 엔드포인트에 대해 CORS 활성화
+app = FastAPI()
 logging.basicConfig(level=logging.INFO)
 
-# TTS 모델 프리로딩 (한 번만 로드)
-try:
-    tts_model = TTS(model_name="tts_models/en/vctk/vits", progress_bar=False, gpu=False)
-    # 모델 문서에 따라 샘플링 레이트 조정 (예시로 22050Hz 사용)
-    sample_rate = 22050
-    logging.info("TTS 모델 로드 성공")
-except Exception as e:
-    logging.error(f"TTS 모델 로드 오류: {e}")
-    raise e
+# 🚀 GPU 활성화 (가능한 경우)
+use_gpu = torch.cuda.is_available()
+tts_model = TTS(model_name="tts_models/en/vctk/vits", progress_bar=False, gpu=use_gpu)
+sample_rate = 22050
 
-@app.route('/api/tts', methods=['POST'])
-def synthesize():
-    data = request.get_json()
-    if not data or 'text' not in data:
-        return jsonify({"error": "Missing 'text' parameter"}), 400
-    text = data['text']
-    # 선택적 speaker 파라미터 (없으면 기본 화자 사용)
-    speaker = data.get('speaker', None)
-    
+logging.info(f"TTS 모델 로드 성공 (GPU 사용: {use_gpu})")
+
+# 요청 데이터 구조 정의
+class TTSRequest(BaseModel):
+    text: str
+    speaker: str = None  # 선택적 화자
+
+@app.post("/api/tts")
+async def synthesize(request: TTSRequest):
     try:
-        if speaker:
-            wav = tts_model.tts(text, speaker=speaker)
-        else:
-            wav = tts_model.tts(text)
+        # TTS 변환 실행
+        wav = tts_model.tts(request.text, speaker=request.speaker) if request.speaker else tts_model.tts(request.text)
         
-        # 모델이 반환하는 음성 데이터가 float 배열이라고 가정하고, [-1,1] 범위를 int16으로 스케일링
+        # float [-1,1] -> int16 변환
         wav = np.array(wav)
         wav_int16 = (np.clip(wav, -1, 1) * 32767).astype(np.int16)
-        
-        # in-memory WAV 파일 생성 (모노, 16비트)
+
+        # WAV 파일 메모리 저장
         buffer = io.BytesIO()
         with wave.open(buffer, 'wb') as wf:
             wf.setnchannels(1)
             wf.setsampwidth(2)
             wf.setframerate(sample_rate)
             wf.writeframes(wav_int16.tobytes())
+
         audio_bytes = buffer.getvalue()
         audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
-        
-        return jsonify({"audio": audio_base64})
+
+        return JSONResponse(content={"audio": audio_base64})
+
     except Exception as e:
         logging.error(f"TTS 합성 오류: {e}")
-        return jsonify({"error": str(e)}), 500
+        raise HTTPException(status_code=500, detail="TTS 처리 중 오류 발생")
 
-if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=5000)
+# 🚀 FastAPI 서버 실행
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=5000, workers=4)  # 멀티프로세싱 적용
