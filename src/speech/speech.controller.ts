@@ -4,22 +4,20 @@ import { Buffer } from 'buffer';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 
-const execFileAsync = promisify(execFile);
+const execFileAsync = promisify(require('child_process').execFile);
 
 if (!global.Buffer) global.Buffer = Buffer;
 
 @Controller('api/speech')
 export class SpeechController {
   /**
-   * STT Endpoint
+   * STT Endpoint using Hugging Face's wav2vec2-large-xlsr-53-english model
    * POST /api/speech/stt
    * 입력: JSON { "audio": "<base64-encoded-audio>" }
-   * 처리: Hugging Face의 Wav2Vec2 모델로 음성을 텍스트로 변환
-   * 출력: JSON { "text": "인식된 텍스트" }
+   * 처리: 음성을 텍스트로 변환하여 반환
    */
   @Post('stt')
   async speechToText(@Body() body: { audio: string }): Promise<any> {
-    // 오디오 데이터가 제공되지 않았거나 빈 문자열인 경우
     if (!body.audio || body.audio.trim() === '') {
       throw new HttpException('No audio provided', HttpStatus.BAD_REQUEST);
     }
@@ -30,27 +28,41 @@ export class SpeechController {
       throw new HttpException('Empty audio data', HttpStatus.BAD_REQUEST);
     }
     
-    try {
-      // Hugging Face Inference API 호출: Wav2Vec2 모델
-      const response = await axios.post(
-        'https://api-inference.huggingface.co/models/facebook/wav2vec2-base-960h',
-        audioBuffer,
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.HF_API_KEY}`,
-            'Content-Type': 'application/octet-stream',
-          },
+    const url = 'https://api-inference.huggingface.co/models/jonatasgrosman/wav2vec2-large-xlsr-53-english';
+    const headers = {
+      Authorization: `Bearer ${process.env.HF_API_KEY}`,
+      'Content-Type': 'application/octet-stream'
+    };
+  
+    const maxAttempts = 5;
+    let attempt = 0;
+    let delay = 1000; // 초기 딜레이: 1초
+  
+    while (attempt < maxAttempts) {
+      try {
+        const response = await axios.post(url, audioBuffer, {
+          headers,
+          timeout: 15000,
+        });
+        // 성공 시 결과 반환
+        return { text: response.data.text || '' };
+      } catch (error: any) {
+        // 만약 503 오류라면 재시도
+        if (error.response && error.response.status === 503) {
+          attempt++;
+          console.error(`Attempt ${attempt} failed with 503. Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          delay *= 2; // 지수적으로 딜레이 증가
+        } else {
+          console.error('STT Error:', error);
+          throw new HttpException('STT 처리 중 오류 발생', HttpStatus.INTERNAL_SERVER_ERROR);
         }
-      );
-      // 응답 데이터의 형식은 모델에 따라 다를 수 있음.
-      // 여기서는 텍스트가 없으면 빈 문자열을 반환하도록 함.
-      return { text: response.data.text || '' };
-    } catch (error: any) {
-      console.error('STT Error:', error);
-      throw new HttpException('STT 처리 중 오류 발생', HttpStatus.INTERNAL_SERVER_ERROR);
+      }
     }
+    
+    // 최대 재시도 횟수 초과 시
+    throw new HttpException('서비스 이용 가능 시간이 지연되었습니다. 나중에 다시 시도해주세요.', HttpStatus.SERVICE_UNAVAILABLE);
   }
-
   /**
    * TTS Endpoint using Flask TTS Service
    * POST /api/speech/tts
