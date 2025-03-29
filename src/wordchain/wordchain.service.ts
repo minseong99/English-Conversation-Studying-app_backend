@@ -1,52 +1,113 @@
 // src/wordchain/wordchain.service.ts
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import axios from 'axios';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface WordChain {
   word: string;
   hint: string;
 }
 
+interface ToeicWord {
+  word: string;
+  definition: string;
+  level: string;
+}
+
 @Injectable()
 export class WordChainService {
-  private randomWordUrl = 'https://random-word-api.herokuapp.com/word?number=10';
-  private dictionaryUrl = 'https://api.dictionaryapi.dev/api/v2/entries/en';
+  private toeicWords: ToeicWord[] = [];
+  private readonly dataPath = path.join(process.cwd(), 'src/data/toeic-words.json');
 
-  // 기본 랜덤 단어 가져오기 (requiredLetter 없이)
+  constructor() {
+    this.loadToeicWords();
+  }
+
+  private loadToeicWords() {
+    try {
+      const data = fs.readFileSync(this.dataPath, 'utf8');
+      const parsedData = JSON.parse(data);
+      this.toeicWords = parsedData.words;
+      console.log(`Loaded ${this.toeicWords.length} TOEIC words successfully`);
+    } catch (error) {
+      console.error('Error loading TOEIC words:', error);
+      // Fallback to sample data if file doesn't exist
+      this.toeicWords = [
+        { word: "business", definition: "The activity of buying and selling goods and services", level: "basic" },
+        { word: "employee", definition: "A person who works for a company or organization", level: "basic" },
+        { word: "technology", definition: "The application of scientific knowledge for practical purposes", level: "intermediate" },
+        { word: "management", definition: "The process of dealing with or controlling things or people", level: "intermediate" },
+        { word: "conference", definition: "A formal meeting for discussion", level: "basic" }
+      ];
+      console.log('Using fallback sample TOEIC words');
+    }
+  }
+
+  // Get a random TOEIC word (no letter requirement)
   async getRandomWord(): Promise<WordChain> {
     return this.getRandomWordWithLetter();
   }
 
-  // requiredLetter가 있으면 해당 글자로 시작하는 단어를 필터링
+  // Get a random TOEIC word starting with the required letter
   async getRandomWordWithLetter(requiredLetter?: string): Promise<WordChain> {
     try {
-      const response = await axios.get<string[]>(this.randomWordUrl);
-      let words = response.data;
+      let filteredWords = this.toeicWords;
+      
       if (requiredLetter) {
-        words = words.filter(word => word[0].toLowerCase() === requiredLetter.toLowerCase());
+        filteredWords = this.toeicWords.filter(
+          wordData => wordData.word[0].toLowerCase() === requiredLetter.toLowerCase()
+        );
       }
-      const word = words.length > 0 ? words[Math.floor(Math.random() * words.length)] : response.data[0];
-      
-      let hint = 'No hint available.';
-      try {
-        const defResponse = await axios.get(`${this.dictionaryUrl}/${word}`);
-        if (Array.isArray(defResponse.data) &&
-            defResponse.data.length > 0 &&
-            defResponse.data[0].meanings &&
-            defResponse.data[0].meanings.length > 0 &&
-            defResponse.data[0].meanings[0].definitions &&
-            defResponse.data[0].meanings[0].definitions.length > 0
-        ) {
-          hint = defResponse.data[0].meanings[0].definitions[0].definition;
-        }
-      } catch (e) {
-        console.error(`Dictionary API error for "${word}":`, e.message);
+
+      // If no words found with the required letter, return random word
+      if (filteredWords.length === 0) {
+        const randomIndex = Math.floor(Math.random() * this.toeicWords.length);
+        const randomWord = this.toeicWords[randomIndex];
+        return {
+          word: randomWord.word,
+          hint: randomWord.definition
+        };
       }
+
+      // Select random word from filtered list
+      const randomIndex = Math.floor(Math.random() * filteredWords.length);
+      const selectedWord = filteredWords[randomIndex];
       
-      return { word, hint };
-    } catch (error: any) {
-      console.error('Error fetching word:', error.message);
-      throw new InternalServerErrorException('Error fetching word from free API');
+      return {
+        word: selectedWord.word,
+        hint: selectedWord.definition
+      };
+    } catch (error) {
+      console.error('Error getting random word:', error);
+      throw new InternalServerErrorException('Error retrieving word from TOEIC database');
+    }
+  }
+
+  // Get possible next words (for enhanced hint functionality)
+  async getPossibleNextWords(currentWord: string, count: number = 3): Promise<WordChain[]> {
+    try {
+      const lastLetter = currentWord.slice(-1).toLowerCase();
+      
+      // Find words starting with the last letter of current word
+      const possibleNextWords = this.toeicWords.filter(
+        wordData => wordData.word[0].toLowerCase() === lastLetter
+      );
+
+      if (possibleNextWords.length === 0) {
+        return [];
+      }
+
+      // Shuffle and select requested number of words
+      const shuffled = [...possibleNextWords].sort(() => 0.5 - Math.random());
+      const selected = shuffled.slice(0, Math.min(count, shuffled.length));
+      
+      return selected.map(word => ({
+        word: word.word,
+        hint: word.definition
+      }));
+    } catch (error) {
+      console.error('Error getting next word suggestions:', error);
+      throw new InternalServerErrorException('Error retrieving word suggestions from TOEIC database');
     }
   }
 }
