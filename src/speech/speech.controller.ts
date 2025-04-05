@@ -1,8 +1,11 @@
-import { Controller, Post, Body, HttpException, HttpStatus } from '@nestjs/common';
+// src/speech/speech.controller.ts
+import { Controller, Post, Body, HttpException, HttpStatus, Inject, Logger } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import axios from 'axios';
 import { Buffer } from 'buffer';
-import { execFile } from 'child_process';
 import { promisify } from 'util';
+import * as crypto from 'crypto';
 
 const execFileAsync = promisify(require('child_process').execFile);
 
@@ -10,6 +13,31 @@ if (!global.Buffer) global.Buffer = Buffer;
 
 @Controller('api/speech')
 export class SpeechController {
+  private readonly logger = new Logger(SpeechController.name);
+  
+  constructor(@Inject(CACHE_MANAGER) private cacheManager: Cache) {}
+
+  /**
+   * Generate cache key for STT requests
+   */
+  private generateSTTCacheKey(audio: string): string {
+    // Create hash of first 20KB of audio (to avoid excessive computation)
+    return `stt:${crypto
+      .createHash('md5')
+      .update(audio.substring(0, 20000))
+      .digest('hex')}`;
+  }
+
+  /**
+   * Generate cache key for TTS requests
+   */
+  private generateTTSCacheKey(text: string, speaker?: string): string {
+    return `tts:${crypto
+      .createHash('md5')
+      .update(`${text}|${speaker || 'default'}`)
+      .digest('hex')}`;
+  }
+
   /**
    * STT Endpoint using Hugging Face's wav2vec2-large-xlsr-53-english model
    * POST /api/speech/stt
@@ -28,6 +56,17 @@ export class SpeechController {
       throw new HttpException('Empty audio data', HttpStatus.BAD_REQUEST);
     }
     
+    // Check cache first (except for very large audio files)
+    if (body.audio.length < 500000) { // Skip caching for very large audios
+      const cacheKey = this.generateSTTCacheKey(body.audio);
+      const cachedResult = await this.cacheManager.get(cacheKey);
+      
+      if (cachedResult) {
+        this.logger.log('STT cache hit');
+        return { text: cachedResult as string, fromCache: true };
+      }
+    }
+    
     const url = 'https://api-inference.huggingface.co/models/jonatasgrosman/wav2vec2-large-xlsr-53-english';
     const headers = {
       Authorization: `Bearer ${process.env.HF_API_KEY}`,
@@ -37,6 +76,7 @@ export class SpeechController {
     const maxAttempts = 5;
     let attempt = 0;
     let delay = 1000; // 초기 딜레이: 1초
+    let lastError: any = null;
   
     while (attempt < maxAttempts) {
       try {
@@ -44,25 +84,68 @@ export class SpeechController {
           headers,
           timeout: 15000,
         });
-        // 성공 시 결과 반환
-        return { text: response.data.text || '' };
-      } catch (error: any) {
-        // 만약 503 오류라면 재시도
-        if (error.response && error.response.status === 503) {
-          attempt++;
-          console.error(`Attempt ${attempt} failed with 503. Retrying in ${delay}ms...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          delay *= 2; // 지수적으로 딜레이 증가
-        } else {
-          console.error('STT Error:', error);
-          throw new HttpException('STT 처리 중 오류 발생', HttpStatus.INTERNAL_SERVER_ERROR);
+        
+        // Process successful response
+        const resultText = response.data.text || '';
+        
+        // Cache result for future use (only cache smaller audios)
+        if (body.audio.length < 500000) {
+          const cacheKey = this.generateSTTCacheKey(body.audio);
+          await this.cacheManager.set(cacheKey, resultText, 60 * 60 * 1000); // 1 hour TTL
+          this.logger.log('STT result cached');
         }
+        
+        // 성공 시 결과 반환
+        return { text: resultText };
+      } catch (error: any) {
+        lastError = error;
+        
+        // Intelligent retry logic
+        if (error.response) {
+          const status = error.response.status;
+          
+          // For rate limiting or service unavailable, retry with backoff
+          if (status === 503 || status === 429) {
+            attempt++;
+            this.logger.warn(`STT attempt ${attempt} failed with ${status}. Retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            delay *= 2; // 지수적으로 딜레이 증가
+            continue;
+          }
+          
+          // For other HTTP errors, don't retry
+          this.logger.error(`STT error with status ${status}:`, error.response.data);
+          throw new HttpException(
+            `STT service error: ${error.response.data?.error || 'Unknown error'}`, 
+            status
+          );
+        }
+        
+        // For network errors, retry up to limit
+        attempt++;
+        this.logger.warn(`STT network error (attempt ${attempt}). Retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay *= 2;
       }
     }
     
-    // 최대 재시도 횟수 초과 시
-    throw new HttpException('서비스 이용 가능 시간이 지연되었습니다. 나중에 다시 시도해주세요.', HttpStatus.SERVICE_UNAVAILABLE);
+    // Log details about the failed request
+    this.logger.error('STT failed after max retries:', lastError);
+    
+    // Return a more specific error based on the last error
+    if (lastError?.response?.status === 429) {
+      throw new HttpException(
+        'Speech recognition service is currently overloaded. Please try again later.',
+        HttpStatus.TOO_MANY_REQUESTS
+      );
+    }
+    
+    throw new HttpException(
+      'Speech recognition failed after multiple attempts. Please try again later.',
+      HttpStatus.SERVICE_UNAVAILABLE
+    );
   }
+
   /**
    * TTS Endpoint using Flask TTS Service
    * POST /api/speech/tts
@@ -73,21 +156,98 @@ export class SpeechController {
   @Post('tts')
   async textToSpeech(@Body() body: { text: string, speaker?: string }): Promise<any> {
     try {
-      const flaskUrl = `http://${process.env.FLASK_IP}:5000/api/tts`; // Flask TTS 서비스의 URL로 교체하세요.
-      const response = await axios.post(
-        flaskUrl,
-        {
-          text: body.text,
-          speaker: body.speaker, // 선택적 화자 옵션
-        },
-        { headers: { 'Content-Type': 'application/json' } }
+      // Validate input
+      if (!body.text || body.text.trim() === '') {
+        throw new HttpException('No text provided', HttpStatus.BAD_REQUEST);
+      }
+      
+      // Check cache first
+      const cacheKey = this.generateTTSCacheKey(body.text, body.speaker);
+      const cachedAudio = await this.cacheManager.get(cacheKey);
+      
+      if (cachedAudio) {
+        this.logger.log('TTS cache hit');
+        return { audio: cachedAudio, fromCache: true };
+      }
+      
+      // Prepare Flask TTS service URL
+      const flaskUrl = `http://${process.env.FLASK_IP || 'localhost'}:5000/api/tts`;
+      
+      // Initialize retry variables
+      const maxRetries = 3;
+      let retryCount = 0;
+      let lastError: any = null;
+      
+      // TTS API call with retry
+      while (retryCount <= maxRetries) {
+        try {
+          const response = await axios.post(
+            flaskUrl,
+            {
+              text: body.text,
+              speaker: body.speaker, // 선택적 화자 옵션
+            },
+            { 
+              headers: { 'Content-Type': 'application/json' },
+              timeout: 10000 // 10s timeout
+            }
+          );
+          
+          // Cache successful response
+          if (response.data && response.data.audio) {
+            await this.cacheManager.set(
+              cacheKey, 
+              response.data.audio, 
+              30 * 60 * 1000 // 30 minutes TTL
+            );
+            this.logger.log('TTS result cached');
+          }
+          
+          return response.data; // { audio: "base64string" }
+        } catch (error: any) {
+          lastError = error;
+          
+          // Check if we should retry
+          if (
+            retryCount < maxRetries && 
+            (!error.response || error.response.status >= 500 || error.response.status === 429)
+          ) {
+            retryCount++;
+            const delay = Math.pow(2, retryCount) * 1000; // Exponential backoff
+            this.logger.warn(`TTS retry ${retryCount}/${maxRetries} after ${delay}ms`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          } else {
+            // Don't retry client errors or after max retries
+            break;
+          }
+        }
+      }
+      
+      // Handle errors after retries
+      this.logger.error('TTS failed after retries:', lastError);
+      
+      if (lastError?.response?.status === 429) {
+        throw new HttpException(
+          'TTS service is currently rate limited. Please try again later.',
+          HttpStatus.TOO_MANY_REQUESTS
+        );
+      }
+      
+      throw new HttpException(
+        'Failed to synthesize speech. TTS service may be unavailable.',
+        HttpStatus.SERVICE_UNAVAILABLE
       );
-      return response.data; // { audio: "base64string" }
     } catch (error: any) {
-      console.error('TTS Error:', error);
-      throw new HttpException('TTS 처리 중 오류 발생', HttpStatus.INTERNAL_SERVER_ERROR);
+      if (error instanceof HttpException) {
+        throw error; // Re-throw existing HTTP exceptions
+      }
+      
+      this.logger.error('TTS Error:', error);
+      throw new HttpException(
+        'Failed to process text-to-speech request',
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
     }
   }
-  
 }
 
