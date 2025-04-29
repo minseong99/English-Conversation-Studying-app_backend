@@ -171,7 +171,8 @@ export class SpeechController {
       }
       
       // Prepare Flask TTS service URL
-      const flaskUrl = `http://${process.env.FLASK_IP || 'localhost'}:5000/api/tts`;
+      // const flaskUrl = `http://${process.env.FLASK_IP || 'localhost'}:5000/api/tts`;
+      const flaskUrl = `${process.env.FLASK_URL}/api/tts`
       
       // Initialize retry variables
       const maxRetries = 3;
