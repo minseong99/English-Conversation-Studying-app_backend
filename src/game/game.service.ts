@@ -17,7 +17,14 @@ export class GameService {
   private readonly redisKeyPrefix = 'game:';
 
   constructor(private readonly wordChainService: WordChainService) {
-    this.redisClient = createClient();
+    // this.redisClient = createClient();
+    // this.redisClient.on('error', (err) => console.error('Redis Client Error (GameService):', err));
+    // this.redisClient.connect();
+    this.redisClient = createClient({
+      url: process.env.REDIS_HOST,              // Upstash REST URL
+      password: process.env.REDIS_PASSWORD,     // Upstash password
+      socket: { tls: process.env.REDIS_TLS === 'true' }, // enable TLS if set
+    });
     this.redisClient.on('error', (err) => console.error('Redis Client Error (GameService):', err));
     this.redisClient.connect();
   }

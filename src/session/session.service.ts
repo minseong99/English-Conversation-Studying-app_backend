@@ -25,7 +25,13 @@ export class SessionService implements OnModuleInit, OnModuleDestroy {
       password: process.env.REDIS_PASSWORD || undefined,
     };
     
-    this.client = createClient(this.connectionOptions) as RedisClientType;
+    // this.client = createClient(this.connectionOptions) as RedisClientType;
+    // 변경: Upstash REST URL / 패스워드 / TLS 옵션
+    this.client = createClient({
+      url: process.env.REDIS_HOST,              // Upstash REST URL
+      password: process.env.REDIS_PASSWORD,     // Upstash 비밀번호
+      socket: { tls: process.env.REDIS_TLS === 'true' },
+    }) as RedisClientType;
     
     // Set up event handlers
     this.client.on('error', (err) => {
