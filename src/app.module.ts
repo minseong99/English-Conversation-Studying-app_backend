@@ -1,62 +1,45 @@
 // src/app.module.ts
 import { Module } from '@nestjs/common';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
-import { CacheModule } from '@nestjs/cache-manager';
-import { APP_GUARD } from '@nestjs/core';
-import { redisStore } from 'cache-manager-redis-store';
-
 import { ChatModule } from './chat/chat.module';
 import { SessionModule } from './session/session.module';
 import { SpeechModule } from './speech/speech.module';
 import { WordChainModule } from './wordchain/wordchain.module';
 import { GameModule } from './game/game.module';
 import { HealthModule } from './health/health.module';
-
-import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
-import { ThrottlerModuleOptions } from '@nestjs/throttler/dist/interfaces';
-import Redis from 'ioredis';
-
-
+import { ThrottlerModule } from '@nestjs/throttler';
+import { CacheModule } from '@nestjs/cache-manager';
+import { redisStore } from 'cache-manager-redis-store';
 
 @Module({
   imports: [
-    // 1) ThrottlerModule를 Upstash Redis 기반으로 설정
-    ThrottlerModule.forRootAsync({
-      useFactory: (): ThrottlerModuleOptions => ({
-        ttl: 60,
-        limit: 30,
-        storage: new ThrottlerStorageRedisService(
-          new Redis(process.env.REDIS_URL || ''),
-        ),
-      }),
+    // Rate limiting protection
+    ThrottlerModule.forRoot({
+      throttlers: [
+        {
+          ttl: 60,// time-to-live in seconds
+          limit: 30,// max number of requests within TTL
+        },
+      ],
     }),
-
-    // 2) CacheModule 역시 Upstash Redis REST 로 통일
+    
+    // Global caching with Redis
     CacheModule.registerAsync({
       isGlobal: true,
-      useFactory: async() => ({
+      useFactory: async () => ({
         store: await redisStore({
-          url: process.env.REDIS_URL!,
+          url: process.env.REDIS_URL || 'redis://localhost:6379',
+          ttl: 60 * 5, // Default 5 minutes cache TTL
         }),
-        ttl: 60 * 5,       // 5분 캐시
       }),
     }),
-
+    
     // Application modules
-    ChatModule,
-    SessionModule,
-    SpeechModule,
-    WordChainModule,
+    ChatModule, 
+    SessionModule, 
+    SpeechModule, 
+    WordChainModule, 
     GameModule,
     HealthModule,
-  ],
-
-  // ThrottlerGuard 를 전역으로 활성화
-  providers: [
-    {
-      provide: APP_GUARD,
-      useClass: ThrottlerGuard,
-    },
   ],
 })
 export class AppModule {}
