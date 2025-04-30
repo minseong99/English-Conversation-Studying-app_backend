@@ -46,11 +46,30 @@ export class GameService {
 
   // 게임 상태 조회
   async getGameState(sessionId: string): Promise<GameState> {
-    const data = await this.redis.get<string>(this.key(sessionId));
+    const key = this.key(sessionId);
+    const data = await this.redis.get<any>(key);
+
     if (!data) {
       throw new BadRequestException('No game found for session');
     }
-    return JSON.parse(data);
+
+    let state: GameState;
+
+    if (typeof data === 'string') {
+      // 원시 JSON 문자열일 때만 parse
+      try {
+        state = JSON.parse(data);
+      } catch (e) {
+        throw new InternalServerErrorException('Corrupted game state data');
+      }
+    } else if (typeof data === 'object') {
+      // 이미 객체로 넘어온 경우
+      state = data;
+    } else {
+      throw new InternalServerErrorException('Unexpected game state data type');
+    }
+
+    return state;
   }
 
   // 사용자의 답변 검증 및 새 라운드 진행
@@ -86,23 +105,33 @@ export class GameService {
 
   // 힌트 제공: 가능한 다음 단어들 제안
   async getHint(sessionId: string) {
+    // 1) getGameState() 내부가 안전해졌으니 바로 사용
     const state = await this.getGameState(sessionId);
+
     if (state.hintCount >= 3) {
       return { hint: 'No hints left', hintCount: state.hintCount };
     }
 
-    const options = await this.wordChainService.getPossibleNextWords(state.currentWord, 3);
+    const options = await this.wordChainService.getPossibleNextWords(
+      state.currentWord,
+      3,
+    );
+
     let hintText: string;
-    if (options.length === 0) {
-      hintText = `Starts with "${state.currentWord.slice(-1)}"`;
-    } else if (state.hintCount === 0) {
+    if (options.length === 0 || state.hintCount === 0) {
       hintText = `Starts with "${state.currentWord.slice(-1)}"`;
     } else {
       hintText = options[0].hint;
     }
 
     state.hintCount++;
-    await this.redis.set(this.key(sessionId), JSON.stringify(state), { ex: 3600 });
+    // 저장할 때는 항상 문자열화
+    await this.redis.set(
+      this.key(sessionId),
+      JSON.stringify(state),
+      { ex: 3600 },
+    );
+
     return { hint: hintText, hintCount: state.hintCount };
   }
 }
