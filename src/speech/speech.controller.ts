@@ -169,7 +169,7 @@ export class SpeechController {
     }
 
     // 3) HF Inference API URL & Token (모델을 en/vctk/vits로 고정)
-    const hfUrl = 'https://api-inference.huggingface.co/models/tts_models/en/vctk/vits';
+    const hfUrl = 'https://api-inference.huggingface.co/models/espnet/kan-bayashi_ljspeech_vits';
     const hfToken = process.env.HF_API_KEY;
     if (!hfToken) {
       this.logger.error('HF_TOKEN is not set');
