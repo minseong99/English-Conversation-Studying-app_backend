@@ -16,10 +16,7 @@ async function bootstrap() {
   // Create NestJS application
   const app = await NestFactory.create(AppModule);
   app.enableCors({
-    origin: [
-    'http://localhost:8081',                                           // your Expo web/DevClient
-    'https://english-conversation-studying-appbackend-main.up.railway.app' // your Railway HTTPS URL
-    ],
+    origin: true,
     methods: ['GET','HEAD','PUT','PATCH','POST','DELETE','OPTIONS'],
     allowedHeaders: ['Content-Type','Authorization'],
     credentials: true,
