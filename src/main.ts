@@ -15,7 +15,15 @@ const numCPUs = os.cpus().length;
 async function bootstrap() {
   // Create NestJS application
   const app = await NestFactory.create(AppModule);
-  app.enableCors();
+  app.enableCors({
+    origin: [
+    'http://localhost:8081',                                           // your Expo web/DevClient
+    'https://english-conversation-studying-appbackend-main.up.railway.app' // your Railway HTTPS URL
+    ],
+    methods: ['GET','HEAD','PUT','PATCH','POST','DELETE','OPTIONS'],
+    allowedHeaders: ['Content-Type','Authorization'],
+    credentials: true,
+  });
 
   // JSON body size limit increased to 10MB
   app.use(bodyParser.json({ limit: '10mb' }));
