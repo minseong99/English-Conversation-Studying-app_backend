@@ -20,7 +20,9 @@ export class GameService {
     // this.redisClient = createClient();
     // this.redisClient.on('error', (err) => console.error('Redis Client Error (GameService):', err));
     // this.redisClient.connect();
-    this.redisClient = createClient();  // now picks up REDIS_URL correctly
+    this.redisClient = createClient({
+      url: process.env.REDIS_URL
+    });
     this.redisClient.on('error', (err) => console.error('Redis Client Error (GameService):', err));
     this.redisClient.connect();
   }
