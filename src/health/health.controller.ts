@@ -33,7 +33,7 @@ export class HealthController {
       () => this.disk.checkStorage('disk', { path: '/', thresholdPercent: 0.9 }),
       
       // External service check - TTS service
-      () => this.http.pingCheck('tts_service', `http://${process.env.FLASK_IP}:5000/api/tts`),
+      () => this.http.pingCheck('tts_service', `${process.env.FLASK_URL}/api/tts`),
     ]);
   }
 
