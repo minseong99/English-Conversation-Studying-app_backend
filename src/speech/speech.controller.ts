@@ -190,7 +190,7 @@ export class SpeechController {
             },
             { 
               headers: { 'Content-Type': 'application/json' },
-              timeout: 10000 // 10s timeout
+              timeout: 60000 // 60s timeout
             }
           );
           
