@@ -202,7 +202,7 @@ export class SpeechController {
         const audioBase64 = Buffer.from(response.data, 'binary').toString('base64');
 
         // 6) 캐시에 저장 (30분)
-        await this.cacheManager.set(cacheKey, audioBase64, { ttl: 30 * 60 });
+        await this.cacheManager.set(cacheKey, audioBase64, );
         this.logger.log(`TTS via HF (en/vctk/vits) success on attempt ${attempt + 1}`);
 
         return { audio: audioBase64 };
