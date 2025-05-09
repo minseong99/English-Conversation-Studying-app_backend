@@ -156,9 +156,9 @@ export class ChatService {
       // Extract response text or use default
       return response.data[0]?.generated_text || 'I apologize, but I couldn\'t generate a response.';
     } catch (error) {
-      this.logger.error('Hugging Face API error:', error);
-      
-      // Propagate the error to be handled by retry mechanism
+      const status = error.response?.status;
+      const data = error.response?.data;
+      this.logger.error(`Hugging Face API error status: ${status}`, JSON.stringify(data));
       throw error;
     }
   }

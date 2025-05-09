@@ -32,8 +32,7 @@ export class HealthController {
       // Storage check - max 90% disk usage
       () => this.disk.checkStorage('disk', { path: '/', thresholdPercent: 0.9 }),
       
-      // External service check - TTS service
-      () => this.http.pingCheck('tts_service', `${process.env.FLASK_URL}/api/tts`),
+  
     ]);
   }
 
