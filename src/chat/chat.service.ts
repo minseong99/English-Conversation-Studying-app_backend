@@ -12,6 +12,7 @@ import { Cache } from 'cache-manager';
 import { SessionService } from '../session/session.service';
 import * as crypto from 'crypto';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from "@google/genai";
 
 @Injectable()
 export class ChatService {
@@ -52,20 +53,28 @@ export class ChatService {
         await this.sessionService.saveSession(sessionId, botMessage);
         return { response: cachedResponse, pronouncedText: cachedResponse, fromCache: true };
       }
+      
 
-      const model = this.genAI.getGenerativeModel({ model: 'gemini-2.5-pro' }); // Gemini 2.5 Pro 사용
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-      const result = await model.generateContent(message);
-      const text = result.response.text();
+      async function main() {
+        const response = await ai.models.generateContent({
+          model: "gemini-2.0-flash",
+          contents: message,
+        });
+        const text = response.text;
+        await this.cacheManager.set(cacheKey, text, 5 * 60 * 1000); // 5 minutes
+        const botMessage = {
+          id: Date.now() + 1,
+          text,
+          sender: 'bot',
+        };
+        await this.sessionService.saveSession(sessionId, botMessage);
+        return text;
+      }
 
-      await this.cacheManager.set(cacheKey, text, 5 * 60 * 1000); // 5 minutes
-      const botMessage = {
-        id: Date.now() + 1,
-        text,
-        sender: 'bot',
-      };
-      await this.sessionService.saveSession(sessionId, botMessage);
-
+      const text = await main();
+    
       return { response: text, pronouncedText: text };
     } catch (error) {
       this.logger.error('Gemini API failed:', error);
