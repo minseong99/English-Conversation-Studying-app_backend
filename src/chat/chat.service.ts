@@ -53,7 +53,7 @@ export class ChatService {
         return { response: cachedResponse, pronouncedText: cachedResponse, fromCache: true };
       }
 
-      const model = this.genAI.getGenerativeModel({ model: 'gemini-pro' });
+      const model = this.genAI.getGenerativeModel({ model: 'gemini-2.5-pro' }); // Gemini 2.5 Pro 사용
 
       const result = await model.generateContent(message);
       const text = result.response.text();
