@@ -68,7 +68,7 @@ export class ChatService {
       }
 
       // 3. Call Hugging Face API with retry mechanism using RxJS
-      const apiUrl = 'https://api-inference.huggingface.co/models/facebook/blenderbot-400M-distill';
+      const apiUrl = 'https://api-inference.huggingface.co/models/facebook/blenderbot-400M';
       const headers = { Authorization: `Bearer ${process.env.HF_API_KEY}` };
       
       const chatResponse = await from(
