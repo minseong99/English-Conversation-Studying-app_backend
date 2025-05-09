@@ -3,22 +3,28 @@ import { Injectable, InternalServerErrorException, HttpException, HttpStatus, Lo
 import { Inject } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
-import axios from 'axios';
 import { SessionService } from '../session/session.service';
 import * as crypto from 'crypto';
 import { catchError, delay, retry } from 'rxjs/operators';
 import { from, throwError } from 'rxjs';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 @Injectable()
 export class ChatService {
   private readonly logger = new Logger(ChatService.name);
   private readonly maxRetries = 3;
   private readonly retryDelay = 1000; // Base delay 1s with exponential backoff
+  private genAI: GoogleGenerativeAI;
+  private geminiModel: any; // Using 'any' because the SDK's TypeScript definitions might not be complete
   
   constructor(
     private readonly sessionService: SessionService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
-  ) {}
+  ) {
+    // Initialize Google Gemini API client
+    this.genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+    this.geminiModel = this.genAI.getGenerativeModel({ model: 'gemini-pro' });
+  }
 
   /**
    * Generate a cache key for chat messages
@@ -67,12 +73,9 @@ export class ChatService {
         };
       }
 
-      // 3. Call Hugging Face API with retry mechanism using RxJS
-      const apiUrl = 'https://api-inference.huggingface.co/models/facebook/blenderbot-90M';
-      const headers = { Authorization: `Bearer ${process.env.HF_API_KEY}` };
-      
+      // 3. Call Google Gemini API with retry mechanism using RxJS
       const chatResponse = await from(
-        this.callHuggingFaceAPI(apiUrl, message, headers)
+        this.callGeminiAPI(message)
       )
       .pipe(
         retry({
@@ -85,13 +88,13 @@ export class ChatService {
           }
         }),
         catchError((error) => {
-          if (error.response && error.response.status === 429) {
+          if (error.status === 429) {
             throw new HttpException(
-              'Hugging Face API rate limit exceeded. Please try again later.',
+              'Google Gemini API rate limit exceeded. Please try again later.',
               HttpStatus.TOO_MANY_REQUESTS,
             );
           }
-          this.logger.error(`Failed to call Hugging Face API after ${this.maxRetries} retries:`, error);
+          this.logger.error(`Failed to call Gemini API after ${this.maxRetries} retries:`, error);
           throw new InternalServerErrorException('Chat processing failed after multiple attempts.');
         })
       ).toPromise();
@@ -123,9 +126,9 @@ export class ChatService {
       };
       await this.sessionService.saveSession(sessionId, errorMessage);
       
-      if (error.response && error.response.status === 429) {
+      if (error.status === 429) {
         throw new HttpException(
-          'Hugging Face API request limit exceeded. Please try again later.',
+          'Google Gemini API request limit exceeded. Please try again later.',
           HttpStatus.TOO_MANY_REQUESTS,
         );
       }
@@ -135,30 +138,37 @@ export class ChatService {
   }
 
   /**
-   * Protected method to call Hugging Face API with proper handling
+   * Protected method to call Google Gemini API with proper handling
    */
-  private async callHuggingFaceAPI(url: string, message: string, headers: any): Promise<string> {
+  private async callGeminiAPI(message: string): Promise<string> {
     try {
-      this.logger.log(`Calling Hugging Face API for message: "${message.substring(0, 20)}..."`);
+      this.logger.log(`Calling Google Gemini API for message: "${message.substring(0, 20)}..."`);
       
-      const response = await axios.post(
-        url,
-        { inputs: message },
-        { headers }
-      );
+      // For Gemini, we get chat history for the conversation if needed
+      // This is just a simple implementation - you might want to expand this
+      const result = await this.geminiModel.generateContent({
+        contents: [{ role: 'user', parts: [{ text: message }] }],
+        generationConfig: {
+          temperature: 0.7,
+          topK: 40,
+          topP: 0.95,
+          maxOutputTokens: 1024,
+        },
+      });
 
-      // Check for valid response structure
-      if (!response.data || !Array.isArray(response.data)) {
-        this.logger.warn('Unexpected API response format:', response.data);
-        throw new Error('Invalid API response format');
+      const response = result.response;
+      
+      // Extract text from the response
+      const responseText = response.text();
+      
+      if (!responseText) {
+        this.logger.warn('Empty response from Gemini API');
+        return 'I apologize, but I couldn\'t generate a response.';
       }
 
-      // Extract response text or use default
-      return response.data[0]?.generated_text || 'I apologize, but I couldn\'t generate a response.';
+      return responseText;
     } catch (error) {
-      const status = error.response?.status;
-      const data = error.response?.data;
-      this.logger.error(`Hugging Face API error status: ${status}`, JSON.stringify(data));
+      this.logger.error(`Gemini API error:`, error);
       throw error;
     }
   }

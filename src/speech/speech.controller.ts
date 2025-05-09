@@ -6,6 +6,8 @@ import axios from 'axios';
 import { Buffer } from 'buffer';
 import { promisify } from 'util';
 import * as crypto from 'crypto';
+import { TextToSpeechClient, protos as ttsProtos } from '@google-cloud/text-to-speech';
+import { SpeechClient, protos as sttProtos } from '@google-cloud/speech';
 
 const execFileAsync = promisify(require('child_process').execFile);
 
@@ -14,8 +16,14 @@ if (!global.Buffer) global.Buffer = Buffer;
 @Controller('api/speech')
 export class SpeechController {
   private readonly logger = new Logger(SpeechController.name);
+  private ttsClient: TextToSpeechClient;
+  private sttClient: SpeechClient;
   
-  constructor(@Inject(CACHE_MANAGER) private cacheManager: Cache) {}
+  constructor(@Inject(CACHE_MANAGER) private cacheManager: Cache) {
+    // Initialize Google Cloud clients
+    this.ttsClient = new TextToSpeechClient();
+    this.sttClient = new SpeechClient();
+  }
 
   /**
    * Generate cache key for STT requests
@@ -39,7 +47,7 @@ export class SpeechController {
   }
 
   /**
-   * STT Endpoint using Hugging Face's wav2vec2-large-xlsr-53-english model
+   * STT Endpoint using Google Speech-to-Text API
    * POST /api/speech/stt
    * 입력: JSON { "audio": "<base64-encoded-audio>" }
    * 처리: 음성을 텍스트로 변환하여 반환
@@ -67,12 +75,6 @@ export class SpeechController {
       }
     }
     
-    const url = 'https://api-inference.huggingface.co/models/jonatasgrosman/wav2vec2-large-xlsr-53-english';
-    const headers = {
-      Authorization: `Bearer ${process.env.HF_API_KEY}`,
-      'Content-Type': 'application/octet-stream'
-    };
-  
     const maxAttempts = 5;
     let attempt = 0;
     let delay = 1000; // 초기 딜레이: 1초
@@ -80,13 +82,25 @@ export class SpeechController {
   
     while (attempt < maxAttempts) {
       try {
-        const response = await axios.post(url, audioBuffer, {
-          headers,
-          timeout: 15000,
-        });
+        // Configure request for Google Speech-to-Text
+        const request: sttProtos.google.cloud.speech.v1.IRecognizeRequest = {
+          audio: {
+            content: body.audio, // Already base64 encoded
+          },
+          config: {
+            encoding: sttProtos.google.cloud.speech.v1.RecognitionConfig.AudioEncoding.LINEAR16,
+            sampleRateHertz: 16000,
+            languageCode: 'en-US',
+          },
+        };
         
-        // Process successful response
-        const resultText = response.data.text || '';
+        // Make request to Google Speech-to-Text
+        const [response] = await this.sttClient.recognize(request);
+        
+        // Extract transcription
+        const resultText = response.results
+          .map(result => result.alternatives[0].transcript)
+          .join(' ');
         
         // Cache result for future use (only cache smaller audios)
         if (body.audio.length < 500000) {
@@ -101,23 +115,21 @@ export class SpeechController {
         lastError = error;
         
         // Intelligent retry logic
-        if (error.response) {
-          const status = error.response.status;
-          
+        if (error.code) {
           // For rate limiting or service unavailable, retry with backoff
-          if (status === 503 || status === 429) {
+          if (error.code === 8 || error.code === 14 || error.code === 4) {
             attempt++;
-            this.logger.warn(`STT attempt ${attempt} failed with ${status}. Retrying in ${delay}ms...`);
+            this.logger.warn(`STT attempt ${attempt} failed with code ${error.code}. Retrying in ${delay}ms...`);
             await new Promise(resolve => setTimeout(resolve, delay));
             delay *= 2; // 지수적으로 딜레이 증가
             continue;
           }
           
-          // For other HTTP errors, don't retry
-          this.logger.error(`STT error with status ${status}:`, error.response.data);
+          // For other errors, don't retry
+          this.logger.error(`STT error with code ${error.code}:`, error.details || error.message);
           throw new HttpException(
-            `STT service error: ${error.response.data?.error || 'Unknown error'}`, 
-            status
+            `STT service error: ${error.details || error.message || 'Unknown error'}`, 
+            HttpStatus.BAD_REQUEST
           );
         }
         
@@ -133,7 +145,7 @@ export class SpeechController {
     this.logger.error('STT failed after max retries:', lastError);
     
     // Return a more specific error based on the last error
-    if (lastError?.response?.status === 429) {
+    if (lastError?.code === 8) {
       throw new HttpException(
         'Speech recognition service is currently overloaded. Please try again later.',
         HttpStatus.TOO_MANY_REQUESTS
@@ -147,7 +159,7 @@ export class SpeechController {
   }
 
   /**
-   * TTS Endpoint using Flask TTS Service
+   * TTS Endpoint using Google Text-to-Speech API
    * POST /api/speech/tts
    * 입력: JSON { "text": "합성할 텍스트", "speaker": "화자ID (선택)" }
    * 처리: api 처리 
@@ -168,52 +180,59 @@ export class SpeechController {
       return { audio: cachedAudio, fromCache: true };
     }
 
-    // 3) HF Inference API URL & Token (모델을 en/vctk/vits로 고정)
-    const hfUrl = 'https://api-inference.huggingface.co/models/espnet/kan-bayashi_ljspeech_vits';
-    const hfToken = process.env.HF_API_KEY;
-    if (!hfToken) {
-      this.logger.error('HF_TOKEN is not set');
-      throw new HttpException('TTS service not configured', HttpStatus.INTERNAL_SERVER_ERROR);
-    }
-
-    // 4) 호출 및 재시도 로직
+    // 3) 호출 및 재시도 로직
     const maxRetries = 3;
     let lastError: any = null;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        const response = await axios.post(
-          hfUrl,
-          {
-            inputs: body.text,
-            // 공식 en/vctk/vits 모델은 'speaker' 파라미터를 지원합니다
-            parameters: body.speaker ? { speaker: body.speaker } : {},
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${hfToken}`,
-              'Content-Type': 'application/json',
-            },
-            responseType: 'arraybuffer',
-            timeout: 60000,
-          },
-        );
+        // Configure voice based on speaker parameter
+        let voice: ttsProtos.google.cloud.texttospeech.v1.IVoiceSelectionParams = {
+          languageCode: 'en-US',
+          name: 'en-US-Neural2-F', // Default female voice
+        };
+        
+        // Map speaker parameter to Google voice names
+        if (body.speaker) {
+          // Simple mapping example - extend as needed
+          const voiceMap = {
+            'male': 'en-US-Neural2-D',
+            'female': 'en-US-Neural2-F',
+            'male2': 'en-US-Neural2-J',
+            'female2': 'en-US-Neural2-E',
+          };
+          
+          if (voiceMap[body.speaker]) {
+            voice.name = voiceMap[body.speaker];
+          }
+        }
+        
+        // Configure request
+        const request: ttsProtos.google.cloud.texttospeech.v1.ISynthesizeSpeechRequest = {
+          input: { text: body.text },
+          voice: voice,
+          audioConfig: { audioEncoding: ttsProtos.google.cloud.texttospeech.v1.AudioEncoding.MP3 },
+        };
 
-        // 5) 바이너리 → Base64 인코딩
-        const audioBase64 = Buffer.from(response.data, 'binary').toString('base64');
+        // Make the request
+        const [response] = await this.ttsClient.synthesizeSpeech(request);
+        
+        // Convert audio content to base64
+        const audioBase64 = Buffer.from(response.audioContent).toString('base64');
 
         // 6) 캐시에 저장 (30분)
-        await this.cacheManager.set(cacheKey, audioBase64, );
-        this.logger.log(`TTS via HF (en/vctk/vits) success on attempt ${attempt + 1}`);
+        await this.cacheManager.set(cacheKey, audioBase64, 30 * 60 * 1000);
+        this.logger.log(`TTS via Google TTS success on attempt ${attempt + 1}`);
 
         return { audio: audioBase64 };
       } catch (error: any) {
         lastError = error;
-        const status = error.response?.status;
-
-        // 서버 에러(5xx) 혹은 rate-limit(429)일 때만 재시도
-        if (attempt < maxRetries && (!status || status >= 500 || status === 429)) {
+        
+        // Check if error is retryable
+        const isRetryable = error.code === 8 || error.code === 14 || error.code === 4;
+        
+        if (attempt < maxRetries && isRetryable) {
           const delay = Math.pow(2, attempt + 1) * 1000;
-          this.logger.warn(`HF TTS retry ${attempt + 1}/${maxRetries} after ${delay}ms`);
+          this.logger.warn(`Google TTS retry ${attempt + 1}/${maxRetries} after ${delay}ms`);
           await new Promise(res => setTimeout(res, delay));
           continue;
         }
@@ -223,20 +242,18 @@ export class SpeechController {
 
     // 7) 실패 처리
     this.logger.error('TTS failed after retries:', {
-      status: lastError?.response?.status,
+      code: lastError?.code,
       message: lastError?.message,
     });
-    if (lastError?.response?.status === 429) {
+    if (lastError?.code === 8) {
       throw new HttpException(
         'TTS rate limit exceeded, try again later',
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
     throw new HttpException(
-      'Failed to synthesize via Hugging Face',
+      'Failed to synthesize speech',
       HttpStatus.SERVICE_UNAVAILABLE,
     );
   }
-
 }
-
