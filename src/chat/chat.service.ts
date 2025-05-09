@@ -63,17 +63,18 @@ export class ChatService {
           contents: message,
         });
         const text = response.text;
-        await this.cacheManager.set(cacheKey, text, 5 * 60 * 1000); // 5 minutes
+        
+        return text;
+      }
+      const text = await main();
+
+      await this.cacheManager.set(cacheKey, text, 5 * 60 * 1000); // 5 minutes
         const botMessage = {
           id: Date.now() + 1,
           text,
           sender: 'bot',
         };
-        await this.sessionService.saveSession(sessionId, botMessage);
-        return text;
-      }
-
-      const text = await main();
+      await this.sessionService.saveSession(sessionId, botMessage);
     
       return { response: text, pronouncedText: text };
     } catch (error) {
