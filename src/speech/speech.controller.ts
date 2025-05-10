@@ -124,6 +124,7 @@ export class SpeechController {
       await this.cacheManager.set(cacheKey, audioBase64, 30 * 60 * 1000);
       this.logger.log(`TTS generated with voice: ${body.speaker}`);
 
+      
       return { audio: audioBase64 };
     } catch (error) {
       this.logger.error('Google TTS failed:', error);
