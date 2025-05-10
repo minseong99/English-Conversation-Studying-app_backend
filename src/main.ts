@@ -1,6 +1,5 @@
-// src/main.ts
 import * as dotenv from 'dotenv';
-dotenv.config();
+dotenv.config(); // ① .env 먼저 로딩
 
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
@@ -8,66 +7,72 @@ import * as bodyParser from 'body-parser';
 import * as cluster from 'cluster';
 import * as os from 'os';
 import { Logger } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const logger = new Logger('Bootstrap');
 const numCPUs = os.cpus().length;
 
+// ✅ ② GCP base64 key 복원 처리
+const CREDENTIALS_PATH = path.join(__dirname, '..', 'tmp-google-creds.json');
+
+if (process.env.GOOGLE_CREDENTIALS_B64) {
+  try {
+    const decoded = Buffer.from(process.env.GOOGLE_CREDENTIALS_B64, 'base64').toString('utf-8');
+    fs.writeFileSync(CREDENTIALS_PATH, decoded);
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = CREDENTIALS_PATH;
+    logger.log('✅ Google credentials restored from base64');
+  } catch (err) {
+    logger.error('❌ Failed to decode GOOGLE_CREDENTIALS_B64:', err);
+  }
+}
+
 async function bootstrap() {
-  // Create NestJS application
   const app = await NestFactory.create(AppModule);
   app.enableCors({
     origin: true,
-    methods: ['GET','HEAD','PUT','PATCH','POST','DELETE','OPTIONS'],
-    allowedHeaders: ['Content-Type','Authorization'],
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   });
 
-  // JSON body size limit increased to 10MB
   app.use(bodyParser.json({ limit: '10mb' }));
   app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
 
-  // Get port from environment or use default
   const port = process.env.PORT ?? 3000;
-  
   await app.listen(port);
   logger.log(`Application is running on port ${port}`);
 }
 
-// Implement cluster mode for production
 if (process.env.NODE_ENV === 'production') {
   const clusterAny: any = cluster;
   if (clusterAny.isPrimary) {
     logger.log(`Primary server started on ${process.pid}`);
-    
-    // Fork workers based on CPU cores
-    const workerCount = process.env.WORKER_COUNT ? 
-      parseInt(process.env.WORKER_COUNT) : 
-      Math.min(numCPUs, 4); // Default to max 4 workers or CPU count
-    
+    const workerCount = process.env.WORKER_COUNT ?
+      parseInt(process.env.WORKER_COUNT) :
+      Math.min(numCPUs, 4);
+
     logger.log(`Starting ${workerCount} workers...`);
-    
-    // Fork workers
+
     for (let i = 0; i < workerCount; i++) {
       clusterAny.fork();
     }
-    
-    // Handle worker crashes and restart
+
     clusterAny.on('exit', (worker, code, signal) => {
       logger.warn(`Worker ${worker.process.pid} died with code: ${code} and signal: ${signal}`);
       logger.log('Starting a new worker...');
       clusterAny.fork();
     });
   } else {
-    // Workers can share any TCP connection
     bootstrap().catch(err => {
       logger.error(`Error during bootstrap: ${err}`);
       process.exit(1);
     });
   }
 } else {
-  // Development mode - single process
   bootstrap().catch(err => {
     logger.error(`Error during bootstrap: ${err}`);
     process.exit(1);
   });
 }
+

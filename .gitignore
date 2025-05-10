@@ -3,6 +3,7 @@
 /node_modules
 /build
 /python_env
+/tmp-google-creds.json
 
 # Logs
 logs
