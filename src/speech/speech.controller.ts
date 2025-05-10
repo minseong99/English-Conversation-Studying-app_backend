@@ -59,9 +59,10 @@ export class SpeechController {
     try {
       const [response] = await this.sttClient.recognize({
         config: {
-          encoding: 'LINEAR16',
-          sampleRateHertz: 16000,
+          encoding: 'WEBM_OPUS',
+          sampleRateHertz: 48000,
           languageCode: 'en-US',
+          enableAutomaticPunctuation: true,
         },
         audio: { content: body.audio },
       });
@@ -82,9 +83,16 @@ export class SpeechController {
       }
 
       return { text: transcription };
-    } catch (error) {
-      this.logger.error('Google STT failed:', error);
-      throw new HttpException('Failed to transcribe audio', HttpStatus.SERVICE_UNAVAILABLE);
+    } catch (error: any) {
+    this.logger.error('Google STT failed:', {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      metadata: error.metadata,
+      fullError: error, // 디버깅용 전체 로그
+    });
+
+    throw new HttpException('Failed to transcribe audio', HttpStatus.SERVICE_UNAVAILABLE);
     }
   }
 
@@ -124,7 +132,7 @@ export class SpeechController {
       await this.cacheManager.set(cacheKey, audioBase64, 30 * 60 * 1000);
       this.logger.log(`TTS generated with voice: ${body.speaker}`);
 
-      
+
       return { audio: audioBase64 };
     } catch (error) {
       this.logger.error('Google TTS failed:', error);
