@@ -59,8 +59,8 @@ export class SpeechController {
     try {
       const [response] = await this.sttClient.recognize({
         config: {
-          encoding: 'WEBM_OPUS',
-          sampleRateHertz: 48000,
+          encoding: 'LINEAR16',
+          sampleRateHertz: 16000,
           languageCode: 'en-US',
           enableAutomaticPunctuation: true,
         },
