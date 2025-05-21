@@ -15,6 +15,8 @@ import * as crypto from 'crypto';
 import { SpeechClient } from '@google-cloud/speech';
 import { TextToSpeechClient } from '@google-cloud/text-to-speech';
 
+import { writeFileSync } from 'fs';
+
 @Controller('api/speech')
 export class SpeechController {
   private readonly logger = new Logger(SpeechController.name);
@@ -42,10 +44,20 @@ export class SpeechController {
       throw new HttpException('No audio provided', HttpStatus.BAD_REQUEST);
     }
 
+    
+
+    
+
+
     const audioBuffer = Buffer.from(body.audio, 'base64');
     if (audioBuffer.length === 0) {
       throw new HttpException('Empty audio data', HttpStatus.BAD_REQUEST);
     }
+
+    // 🔍 저장용 디버깅 wav 파일 생성
+    const debugPath = `/tmp/debug-${Date.now()}.wav`;
+    writeFileSync(debugPath, audioBuffer);
+    this.logger.warn(`📁 디버그 오디오 저장됨: ${debugPath} (${audioBuffer.length} bytes)`);
 
     if (body.audio.length < 500000) {
       const cacheKey = this.generateSTTCacheKey(body.audio);
