@@ -60,7 +60,7 @@ export class SpeechController {
       const [response] = await this.sttClient.recognize({
         config: {
           encoding: 'LINEAR16',
-          sampleRateHertz: 32000,
+          sampleRateHertz: 48000,
           languageCode: 'en-US',
           enableAutomaticPunctuation: true,
         },
