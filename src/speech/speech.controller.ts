@@ -50,6 +50,10 @@ export class SpeechController {
     this.logger.log(`📏 base64 length: ${body.audio.length}`);
     this.logger.log(`📦 base64 preview: ${body.audio.substring(0, 100)}...`);
 
+    // Check audio format by examining first few bytes
+    const audioFormat = this.detectAudioFormat(body.audio);
+    this.logger.log(`🔍 Detected audio format: ${audioFormat}`);
+
     if (body.audio.length < 500000) {
       const cacheKey = this.generateSTTCacheKey(body.audio);
       const cachedResult = await this.cacheManager.get(cacheKey);
@@ -66,6 +70,10 @@ export class SpeechController {
           sampleRateHertz: 16000,
           languageCode: 'en-US',
           enableAutomaticPunctuation: true,
+          // Add alternative language code for better recognition
+          alternativeLanguageCodes: ['ko-KR'],
+          // Increase model complexity for better results
+          model: 'latest_long',
         },
         audio: { content: body.audio },
       });
@@ -75,8 +83,10 @@ export class SpeechController {
         .join(' ')
         .trim();
 
+      // Instead of throwing an exception, return an empty string or a placeholder
       if (!transcription) {
-        throw new HttpException('No transcription result', HttpStatus.NO_CONTENT);
+        this.logger.warn('No transcription result returned from Google STT');
+        return { text: "", noSpeechDetected: true };
       }
 
       if (body.audio.length < 500000) {
@@ -87,15 +97,37 @@ export class SpeechController {
 
       return { text: transcription };
     } catch (error: any) {
-    this.logger.error('Google STT failed:', {
-      message: error.message,
-      code: error.code,
-      details: error.details,
-      metadata: error.metadata,
-      fullError: error, // 디버깅용 전체 로그
-    });
+      this.logger.error('Google STT failed:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        metadata: error.metadata,
+      });
 
-    throw new HttpException('Failed to transcribe audio', HttpStatus.SERVICE_UNAVAILABLE);
+      // Return a more helpful error message with suggestions
+      throw new HttpException({
+        status: HttpStatus.SERVICE_UNAVAILABLE,
+        error: 'Failed to transcribe audio',
+        message: 'Speech recognition service is currently unavailable. Please try again later or check your audio format.',
+        details: error.message
+      }, HttpStatus.SERVICE_UNAVAILABLE);
+    }
+  }
+
+  // Helper method to detect audio format from base64 string
+  private detectAudioFormat(base64Audio: string): string {
+    const audioPreview = base64Audio.substring(0, 100);
+    
+    if (audioPreview.startsWith('AAAAGGZ0')) {
+      return '3GP format detected';
+    } else if (audioPreview.startsWith('UklGR')) {
+      return 'WAV format detected';
+    } else if (audioPreview.startsWith('SUQz')) {
+      return 'MP3 format detected';
+    } else if (audioPreview.startsWith('T2dnU')) {
+      return 'OPUS format detected';
+    } else {
+      return 'Unknown format';
     }
   }
 
@@ -134,7 +166,6 @@ export class SpeechController {
 
       await this.cacheManager.set(cacheKey, audioBase64, 30 * 60 * 1000);
       this.logger.log(`TTS generated with voice: ${body.speaker}`);
-
 
       return { audio: audioBase64 };
     } catch (error) {
