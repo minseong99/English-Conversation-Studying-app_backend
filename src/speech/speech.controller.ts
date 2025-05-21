@@ -15,8 +15,6 @@ import * as crypto from 'crypto';
 import { SpeechClient } from '@google-cloud/speech';
 import { TextToSpeechClient } from '@google-cloud/text-to-speech';
 
-import { writeFileSync } from 'fs';
-
 @Controller('api/speech')
 export class SpeechController {
   private readonly logger = new Logger(SpeechController.name);
@@ -44,18 +42,13 @@ export class SpeechController {
       throw new HttpException('No audio provided', HttpStatus.BAD_REQUEST);
     }
 
-    
-
-    
-
-
     const audioBuffer = Buffer.from(body.audio, 'base64');
     if (audioBuffer.length === 0) {
       throw new HttpException('Empty audio data', HttpStatus.BAD_REQUEST);
     }
 
     this.logger.log(`📏 base64 length: ${body.audio.length}`);
-    this.logger.log(`📦 base64 preview: ${body.audio.substring(0, 10000)}...`)
+    this.logger.log(`📦 base64 preview: ${body.audio.substring(0, 100)}...`);
 
     if (body.audio.length < 500000) {
       const cacheKey = this.generateSTTCacheKey(body.audio);
