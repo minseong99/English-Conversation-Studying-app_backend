@@ -23,14 +23,19 @@ export class SpeechController {
 
   constructor(@Inject(CACHE_MANAGER) private cacheManager: Cache) {}
 
+  // ✅ STT 캐시 키 생성
   private generateSTTCacheKey(audio: string): string {
     return `stt:${crypto.createHash('md5').update(audio.substring(0, 20000)).digest('hex')}`;
   }
 
+  // ✅ TTS 캐시 키 생성
   private generateTTSCacheKey(text: string, speaker?: string): string {
     return `tts:${crypto.createHash('md5').update(`${text}|${speaker || 'default'}`).digest('hex')}`;
   }
 
+  // ==========================
+  // 🗣️ STT: Speech to Text
+  // ==========================
   @Post('stt')
   async speechToText(@Body() body: { audio: string }): Promise<any> {
     if (!body.audio || body.audio.trim() === '') {
@@ -42,9 +47,6 @@ export class SpeechController {
       throw new HttpException('Empty audio data', HttpStatus.BAD_REQUEST);
     }
 
-    this.logger.log(`📏 base64 length: ${body.audio.length}`);
-    this.logger.log(`📦 base64 preview: ${body.audio.substring(0, 100)}...`);
-
     if (body.audio.length < 500000) {
       const cacheKey = this.generateSTTCacheKey(body.audio);
       const cachedResult = await this.cacheManager.get(cacheKey);
@@ -55,20 +57,15 @@ export class SpeechController {
     }
 
     try {
-      const cleanBase64 = body.audio.replace(/^data:audio\/\w+;base64,/, '');
-      const request: Parameters<typeof this.sttClient.recognize>[0] = {
+      const [response] = await this.sttClient.recognize({
         config: {
           encoding: 'LINEAR16',
-          sampleRateHertz: 16000,
+          sampleRateHertz: 32000,
           languageCode: 'en-US',
           enableAutomaticPunctuation: true,
         },
-        audio: {
-          content: cleanBase64,
-        },
-      };
-
-      const [response] = await this.sttClient.recognize(request);
+        audio: { content: body.audio },
+      });
 
       const transcription = response.results
         ?.map(result => result.alternatives?.[0]?.transcript)
@@ -87,18 +84,21 @@ export class SpeechController {
 
       return { text: transcription };
     } catch (error: any) {
-      this.logger.error('Google STT failed:', {
-        message: error.message,
-        code: error.code,
-        details: error.details,
-        metadata: error.metadata,
-        fullError: error,
-      });
+    this.logger.error('Google STT failed:', {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      metadata: error.metadata,
+      fullError: error, // 디버깅용 전체 로그
+    });
 
-      throw new HttpException('Failed to transcribe audio', HttpStatus.SERVICE_UNAVAILABLE);
+    throw new HttpException('Failed to transcribe audio', HttpStatus.SERVICE_UNAVAILABLE);
     }
   }
 
+  // ==========================
+  // 🔊 TTS: Text to Speech
+  // ==========================
   @Post('tts')
   async textToSpeech(@Body() body: { text: string; speaker?: string }): Promise<any> {
     if (!body.text || body.text.trim() === '') {
@@ -131,6 +131,7 @@ export class SpeechController {
 
       await this.cacheManager.set(cacheKey, audioBase64, 30 * 60 * 1000);
       this.logger.log(`TTS generated with voice: ${body.speaker}`);
+
 
       return { audio: audioBase64 };
     } catch (error) {
