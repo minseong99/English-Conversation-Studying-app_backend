@@ -54,10 +54,8 @@ export class SpeechController {
       throw new HttpException('Empty audio data', HttpStatus.BAD_REQUEST);
     }
 
-    // 🔍 저장용 디버깅 wav 파일 생성
-    const debugPath = `/tmp/debug-${Date.now()}.wav`;
-    writeFileSync(debugPath, audioBuffer);
-    this.logger.warn(`📁 디버그 오디오 저장됨: ${debugPath} (${audioBuffer.length} bytes)`);
+    this.logger.log(`📏 base64 length: ${body.audio.length}`);
+    this.logger.log(`📦 base64 preview: ${body.audio.substring(0, 10000)}...`)
 
     if (body.audio.length < 500000) {
       const cacheKey = this.generateSTTCacheKey(body.audio);
